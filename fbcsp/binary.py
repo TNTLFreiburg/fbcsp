@@ -1,11 +1,16 @@
 import logging
-from braindecode.trial_segment import segment_dat
-from braindecode.mywyrm.processing import (
-    lda_apply, select_classes,
-    lda_train_scaled, apply_csp_var_log, bandpass_cnt,
-    calculate_csp, exponential_standardize_cnt)
+#from braindecode.trial_segment import segment_dat
+#from braindecode.mywyrm.processing import (
+#    lda_apply, select_classes,
+#    lda_train_scaled, apply_csp_var_log, bandpass_cnt,
+#    calculate_csp, exponential_standardize_cnt)
 import numpy as np
-from braindecode.mywyrm.processing import online_standardize_epo
+#from braindecode.mywyrm.processing import online_standardize_epo
+from braindecode.datautil.trial_segment import create_signal_target_from_raw_mne
+from fbcsp.lda import lda_train_scaled, lda_apply
+from fbcsp.signalproc import bandpass_mne, select_trials, select_classes, \
+    calculate_csp, apply_csp_var_log
+
 log = logging.getLogger(__name__)
 
 
@@ -24,13 +29,14 @@ class BinaryCSP(object):
         # only at very end
         for bp_nr, filt_band in enumerate(self.filterbands):
             self.print_filter(bp_nr)
-            bandpassed_cnt = bandpass_cnt(self.cnt, filt_band[0], filt_band[1],
+            bandpassed_cnt = bandpass_mne(self.cnt, filt_band[0], filt_band[1],
                 filt_order=self.filt_order)
             if self.standardize_filt_cnt:
                 bandpassed_cnt = exponential_standardize_cnt(bandpassed_cnt)
-            epo = segment_dat(bandpassed_cnt,
-                marker_def=self.marker_def, 
-                ival=self.segment_ival)
+            epo = create_signal_target_from_raw_mne(
+                bandpassed_cnt,
+                name_to_start_codes=self.marker_def,
+                epoch_ival_ms=self.segment_ival)
 
             for fold_nr in range(len(self.folds)):
                 self.run_fold(epo, bp_nr, fold_nr)
@@ -40,13 +46,14 @@ class BinaryCSP(object):
         train_test = self.folds[fold_nr]
         train_ind = train_test['train']
         test_ind = train_test['test']
-        epo_train = epo.isel(trials=train_ind)
-        epo_test = epo.isel(trials=test_ind)#select_epochs(epo, test_ind)
+        epo_train = select_trials(epo, train_ind)
+        epo_test = select_trials(epo, test_ind)
         if self.standardize_epo:
+            assert False
             epo_train, epo_test = online_standardize_epo(epo_train, epo_test)
         # TODELAY: also integrate into init and store results
-        self.train_labels_full_fold[fold_nr] = epo_train.trials.data
-        self.test_labels_full_fold[fold_nr] = epo_test.trials.data
+        self.train_labels_full_fold[fold_nr] = epo_train.y
+        self.test_labels_full_fold[fold_nr] = epo_test.y
         
         for pair_nr in range(len(self.class_pairs)):
             self.run_pair(epo_train, epo_test, bp_nr, fold_nr, pair_nr)
@@ -62,8 +69,8 @@ class BinaryCSP(object):
         assert self.ival_optimizer is None
 
             
-        self.train_labels[fold_nr][pair_nr] = epo_train_pair.trials.data
-        self.test_labels[fold_nr][pair_nr] = epo_test_pair.trials.data
+        self.train_labels[fold_nr][pair_nr] = epo_train_pair.y
+        self.test_labels[fold_nr][pair_nr] = epo_test_pair.y
         
         ## Calculate CSP
         filters, patterns, variances = calculate_csp(epo_train_pair)
@@ -75,7 +82,7 @@ class BinaryCSP(object):
                 list(range(-self.n_filters, 0)))
         else: # take all possible filters
             columns = list(range(len(filters)))
-        train_feature = apply_csp_var_log(epo_train_pair, filters, 
+        train_feature = apply_csp_var_log(epo_train_pair, filters,
             columns)
 
         ## Calculate LDA
@@ -83,19 +90,28 @@ class BinaryCSP(object):
         assert not np.any(np.isnan(clf[0]))
         assert not np.isnan(clf[1])
         ## Apply LDA to train
+        #from numpy.random import  RandomState
+        #clf = (RandomState(39483498).randn(len(clf[0])), clf[1])
         train_out = lda_apply(train_feature, clf)
-        true_0_1_labels_train = train_feature.trials.data == class_pair[1]
+        true_0_1_labels_train = train_feature.y == class_pair[1]
+
         predicted_train = train_out >= 0
+        #print("predicted train", predicted_train)
+        #print("true_0_1_labels_train ", true_0_1_labels_train)
         train_accuracy = np.mean(true_0_1_labels_train == predicted_train)
 
         ### Feature Computation and LDA Application for test
         test_feature = apply_csp_var_log(epo_test_pair, filters, 
             columns)
         test_out = lda_apply(test_feature, clf)
-        true_0_1_labels_test= test_feature.trials.data == class_pair[1]
+        true_0_1_labels_test= test_feature.y == class_pair[1]
         predicted_test = test_out >= 0
         test_accuracy = np.mean(true_0_1_labels_test == predicted_test)
+        #print("test out", test_out)
+        #print("predicted test", predicted_test)
+        #print("true_0_1_labels_test ", true_0_1_labels_test)
 
+        #print("equal predicted and actual ", true_0_1_labels_test == predicted_test)
         ### Feature Computations for full fold (for later multiclass)
         train_feature_full_fold = apply_csp_var_log(epo_train,
              filters, columns)

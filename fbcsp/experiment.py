@@ -1,19 +1,21 @@
-from braindecode.mywyrm.processing import (
-    resample_cnt, common_average_reference_cnt, exponential_standardize_cnt,
-    set_channel_to_zero, select_channels, concatenate_cnt)
-from braindecode.mywyrm.clean import (NoCleaner, clean_train_test_cnt)
+#from braindecode.mywyrm.processing import (
+#    resample_cnt, common_average_reference_cnt, exponential_standardize_cnt,
+#    set_channel_to_zero, select_channels, concatenate_cnt)
+#from braindecode.mywyrm.clean import (NoCleaner, clean_train_test_cnt)
 import itertools
-from sklearn.cross_validation import KFold
-from braindecode.csp.binary import BinaryCSP
-from braindecode.csp.filterbank import FilterbankCSP
-from braindecode.csp.multiclass import    MultiClassWeightedVoting
+from braindecode.datautil.iterators import get_balanced_batches
+from fbcsp.binary import BinaryCSP
+#from braindecode.csp.filterbank import FilterbankCSP
+#from braindecode.csp.multiclass import    MultiClassWeightedVoting
 import numpy as np
-from copy import deepcopy
+#from copy import deepcopy
 from numpy.random import RandomState
-from braindecode.datasets.sensor_positions import sort_topologically
-from braindecode.csp.generate_filterbank import generate_filterbank,\
-    filterbank_is_stable
+#from braindecode.datasets.sensor_positions import sort_topologically
+from fbcsp.filterbank import generate_filterbank, filterbank_is_stable
+from fbcsp.clean import NoCleaner
 import logging
+
+
 log = logging.getLogger(__name__)
 
 class CSPExperiment(object):
@@ -113,6 +115,8 @@ class CSPExperiment(object):
     def __init__(
             self,
             set_loader,
+            name_to_start_codes,
+            epoch_ival_ms,
             cleaner=None,
             sensor_names=None,
             resample_fs=None,
@@ -126,7 +130,6 @@ class CSPExperiment(object):
             high_overlap=0,
             filt_order=3,
             standardize_filt_cnt=False,
-            segment_ival=(0, 4000),
             standardize_epo=True,
             n_folds=5,
             n_top_bottom_csp_filters=None,
@@ -140,7 +143,6 @@ class CSPExperiment(object):
             common_average_reference=False,
             ival_optimizer=None,
             shuffle=False,
-            marker_def=None,
             set_cz_to_zero=False,
             low_bound=0.2):
         local_vars = locals()
@@ -149,12 +151,9 @@ class CSPExperiment(object):
         # remember params for later result printing etc
         # maybe delete this again?
         # Default marker def is form our EEG 3-4 sec motor imagery dataset
-        if self.marker_def is None:
-            self.marker_def = {'1 - Right Hand': [1], '2 - Left Hand': [2],
-                               '3 - Rest': [3], '4 - Feet': [4]}
         if self.cleaner is None:
-            self.cleaner = NoCleaner(segment_ival=self.segment_ival,
-                                     marker_def=self.marker_def)
+            self.cleaner = NoCleaner(epoch_ival_ms=self.epoch_ival_ms,
+                                     name_to_start_codes=self.name_to_start_codes)
         self.filterbank_csp = None
         self.binary_csp = None
         self.cnt = None
@@ -178,6 +177,8 @@ class CSPExperiment(object):
 
     def load_bbci_set(self):
         self.cnt = self.set_loader.load()
+        if 'STI 014' in self.cnt.ch_names:
+            self.cnt = self.cnt.drop_channels(['STI 014'])
 
     def clean_set(self):
         clean_result = self.cleaner.clean(self.cnt)
@@ -190,13 +191,15 @@ class CSPExperiment(object):
     def preprocess_set(self):
         # only remove rejected channels now so that clean function can
         # be called multiple times without changing cleaning results
-        self.cnt = select_channels(self.cnt, self.rejected_chan_names,
-                                   invert=True)
+        if len(self.rejected_chan_names) > 0:
+            retained_chans = [name for name in self.cnt.ch_names
+                              if name not in self.rejected_chan_names]
+            self.cnt = self.cnt.pick_channels(retained_chans)
         if self.sensor_names is not None:
             # Note this does not respect order of sensor names,
             # it selects chans form given sensor names
             # but keeps original order
-            self.cnt = select_channels(self.cnt, self.sensor_names)
+            self.cnt = self.cnt.pick_channels(self.sensor_names)
 
         if self.set_cz_to_zero is True:
             self.cnt = set_channel_to_zero(self.cnt, 'Cz')
@@ -210,7 +213,7 @@ class CSPExperiment(object):
     def remember_sensor_names(self):
         """ Just to be certain have correct sensor names, take them
         from cnt signal"""
-        self.sensor_names = self.cnt.channels.data
+        self.sensor_names = self.cnt.ch_names
 
     def init_training_vars(self):
         self.filterbands = generate_filterbank(
@@ -221,7 +224,7 @@ class CSPExperiment(object):
             low_bound=self.low_bound)
         assert filterbank_is_stable(
             self.filterbands, self.filt_order,
-            self.cnt.attrs['fs']), (
+            self.cnt.info['sfreq']), (
                 "Expect filter bank to be stable given filter order.")
         # check if number of selected features is not too large
         if self.n_selected_features is not None:
@@ -235,7 +238,7 @@ class CSPExperiment(object):
                     n_max_features, self.n_selected_features)
             )
 
-        n_classes = len(self.marker_def)
+        n_classes = len(self.name_to_start_codes)
         self.class_pairs = list(itertools.combinations(range(n_classes),2))
         # use only number of clean trials to split folds
         n_clean_trials = len(self.clean_trials)
@@ -244,30 +247,29 @@ class CSPExperiment(object):
                 n_clean_trials = int(n_clean_trials * self.restricted_n_trials)
             else:
                 n_clean_trials = min(n_clean_trials, self.restricted_n_trials)
-        if not self.shuffle:
-            folds = KFold(n_clean_trials, n_folds=self.n_folds, 
-                shuffle=False)
-        else:
-            rng = RandomState(903372376)
-            folds = KFold(n_clean_trials, n_folds=self.n_folds, 
-                shuffle=True, random_state=rng)
-            
+        rng = RandomState(903372376)
+        folds = get_balanced_batches(n_clean_trials, rng, self.shuffle,
+                                     n_batches=self.n_folds)
+
         # remap to original indices in unclean set(!)
-        self.folds = map(lambda fold: 
-            {'train': self.clean_trials[fold[0]], 
-             'test': self.clean_trials[fold[1]]},
-            folds)
+        # train is everything except fold
+        # test is fold inds
+        self.folds = list(map(lambda fold:
+            {'train': self.clean_trials[
+                      np.setdiff1d(np.arange(n_clean_trials),fold)],
+             'test': self.clean_trials[fold]},
+            folds))
         if self.only_last_fold:
             self.folds = self.folds[-1:]
 
     def run_training(self):
         self.binary_csp = BinaryCSP(self.cnt, self.filterbands, 
             self.filt_order, self.folds, self.class_pairs, 
-            self.segment_ival, self.n_top_bottom_csp_filters, 
+            self.epoch_ival_ms, self.n_top_bottom_csp_filters,
             standardize_filt_cnt=self.standardize_filt_cnt,
             standardize_epo=self.standardize_epo,
             ival_optimizer=self.ival_optimizer,
-            marker_def=self.marker_def)
+            marker_def=self.name_to_start_codes)
         self.binary_csp.run()
         
         self.filterbank_csp = FilterbankCSP(self.binary_csp, 
