@@ -1,19 +1,12 @@
-#from braindecode.mywyrm.processing import (
-#    resample_cnt, common_average_reference_cnt, exponential_standardize_cnt,
-#    set_channel_to_zero, select_channels, concatenate_cnt)
-#from braindecode.mywyrm.clean import (NoCleaner, clean_train_test_cnt)
 import itertools
 from braindecode.datautil.iterators import get_balanced_batches
+from braindecode.datautil.trial_segment import create_signal_target_from_raw_mne
 from braindecode.mne_ext.signalproc import concatenate_raws_with_events
 from fbcsp.binary import BinaryCSP
 from fbcsp.filterbank import FilterbankCSP
-#from braindecode.csp.multiclass import    MultiClassWeightedVoting
 import numpy as np
-#from copy import deepcopy
 from numpy.random import RandomState
-#from braindecode.datasets.sensor_positions import sort_topologically
 from fbcsp.filterbank import generate_filterbank, filterbank_is_stable
-from fbcsp.clean import NoCleaner
 import logging
 
 from fbcsp.multiclass import MultiClassWeightedVoting
@@ -26,19 +19,13 @@ class CSPExperiment(object):
 
         Parameters
         ----------
-        set_loader : Dataset loader
-            An object which loads the dataset. 
-            Should have a load method which returns a wyrm data object with 
-            the continuuous signal.
-        cleaner : Cleaning object
-            Should have a clean method which accepts the continuuous signal as 
-            a wyrm object and returns the rejected chans, rejected trials and
-            the clean trials.
-        sensor_names : string array
-             Names of sensors to use. 
-             None implies all sensors.
-        resample_fs : float
-            The resampling frequency. None means no resampling.
+        cnt : Dataset
+            The continuous recordings with events in info['events']
+        name_to_start_codes: dict
+            Dictionary mapping class names to marker numbers, e.g.
+            {'1 - Correct': [31], '2 - Error': [32]}
+        epoch_ival_ms : sequence of 2 floats
+            The start and end of the trial in milliseconds with respect to the markers.
         min_freq : int
             The minimum frequency of the filterbank.
         max_freq : int
@@ -55,16 +42,6 @@ class CSPExperiment(object):
             The overlap of the filterbands in the higher frequencies.
         filt_order : int
             The filter order of the butterworth filter which computes the filterbands.
-        standardize_filt_cnt: bool
-            Whether to do (channel-wise) exponential moving standardization of the
-            continuous signal
-        segment_ival : sequence of 2 floats
-            The start and end of the trial in milliseconds with respect to the markers.
-        standardize_epo : bool
-            Whether to standardize the features of the filterbank before training.
-            Will do online standardization, i.e., will compute means and standard
-            deviations on the training fold and then compute running means and
-            standard deviations going trial by trial through the test fold.
         n_folds : int
             How many folds. Also determines size of the test fold, e.g.
             5 folds imply the test fold has 20% of the original data.
@@ -101,28 +78,16 @@ class CSPExperiment(object):
         restricted_n_trials: int
             Take only a restricted number of the clean trials.
             None implies all clean trials.
-        common_average_reference: bool
-            Whether to run a common average reference on the signal (before filtering).
-        ival_optimizer: IvalOptimizer object
-            If given, optimize the ival inside the trial before CSP.
-            None means use the full trial.
         shuffle: bool
             Whether to shuffle the clean trials before splitting them into folds.
             False implies folds are time-blocks, True implies folds are random
             mixes of trials of the entire file.
-        marker_def: dict
-            Dictionary mapping class names to marker numbers, e.g.
-            {'1 - Correct': [31], '2 - Error': [32]}
     """
     def __init__(
             self,
-            set_loader,
+            cnt,
             name_to_start_codes,
             epoch_ival_ms,
-            cleaner=None,
-            sensor_names=None,
-            resample_fs=None,
-            standardize_cnt=False,
             min_freq=0,
             max_freq=48,
             last_low_freq=48,
@@ -131,8 +96,6 @@ class CSPExperiment(object):
             high_width=4,
             high_overlap=0,
             filt_order=3,
-            standardize_filt_cnt=False,
-            standardize_epo=True,
             n_folds=5,
             n_top_bottom_csp_filters=None,
             n_selected_filterbands=None,
@@ -142,80 +105,19 @@ class CSPExperiment(object):
             stop_when_no_improvement=False,
             only_last_fold=False,
             restricted_n_trials=None,
-            common_average_reference=False,
-            ival_optimizer=None,
             shuffle=False,
-            set_cz_to_zero=False,
             low_bound=0.2):
         local_vars = locals()
         del local_vars['self']
         self.__dict__.update(local_vars)
-        # remember params for later result printing etc
-        # maybe delete this again?
-        # Default marker def is form our EEG 3-4 sec motor imagery dataset
-        if self.cleaner is None:
-            self.cleaner = NoCleaner(epoch_ival_ms=self.epoch_ival_ms,
-                                     name_to_start_codes=self.name_to_start_codes)
         self.filterbank_csp = None
         self.binary_csp = None
-        self.cnt = None
-        self.sensor_names = None
         self.filterbands = None
-        self.rejected_chan_names = None
-        self.clean_trials = None
-        self.rejected_trials = None
 
     def run(self):
-        log.info("Loading set...")
-        self.load_bbci_set()
-        log.info("Cleaning set...")
-        self.clean_set()
-        log.info("Preprocessing set...")
-        self.preprocess_set()
-        self.remember_sensor_names()
         self.init_training_vars()
         log.info("Running Training...")
         self.run_training()
-
-    def load_bbci_set(self):
-        self.cnt = self.set_loader.load()
-        if 'STI 014' in self.cnt.ch_names:
-            self.cnt = self.cnt.drop_channels(['STI 014'])
-
-    def clean_set(self):
-        clean_result = self.cleaner.clean(self.cnt)
-        self.rejected_chan_names = np.array(clean_result.rejected_chan_names)
-        self.rejected_trials = np.array(clean_result.rejected_trials)
-        self.clean_trials = np.array(clean_result.clean_trials)
-        # do not remove rejected channels yet to allow calling
-        # this function several times with same result
-
-    def preprocess_set(self):
-        # only remove rejected channels now so that clean function can
-        # be called multiple times without changing cleaning results
-        if len(self.rejected_chan_names) > 0:
-            retained_chans = [name for name in self.cnt.ch_names
-                              if name not in self.rejected_chan_names]
-            self.cnt = self.cnt.pick_channels(retained_chans)
-        if self.sensor_names is not None:
-            # Note this does not respect order of sensor names,
-            # it selects chans form given sensor names
-            # but keeps original order
-            self.cnt = self.cnt.pick_channels(self.sensor_names)
-
-        if self.set_cz_to_zero is True:
-            self.cnt = set_channel_to_zero(self.cnt, 'Cz')
-        if self.resample_fs is not None:
-            self.cnt = resample_cnt(self.cnt, new_fs=self.resample_fs)
-        if self.common_average_reference is True:
-            self.cnt = common_average_reference_cnt(self.cnt)
-        if self.standardize_cnt is True:
-            self.cnt = exponential_standardize_cnt(self.cnt)
-
-    def remember_sensor_names(self):
-        """ Just to be certain have correct sensor names, take them
-        from cnt signal"""
-        self.sensor_names = self.cnt.ch_names
 
     def init_training_vars(self):
         self.filterbands = generate_filterbank(
@@ -232,7 +134,7 @@ class CSPExperiment(object):
         if self.n_selected_features is not None:
             n_spatial_filters = self.n_top_bottom_csp_filters
             if n_spatial_filters is None:
-                n_spatial_filters = len(self.sensor_names)
+                n_spatial_filters = len(self.cnt.ch_names)
             n_max_features = len(self.filterbands) * n_spatial_filters
             assert n_max_features >= self.n_selected_features, (
                 "Cannot select more features than will be originally created "
@@ -243,24 +145,25 @@ class CSPExperiment(object):
         n_classes = len(self.name_to_start_codes)
         self.class_pairs = list(itertools.combinations(range(n_classes),2))
         # use only number of clean trials to split folds
-        n_clean_trials = len(self.clean_trials)
+        epo = create_signal_target_from_raw_mne(
+            self.cnt, name_to_start_codes=self.name_to_start_codes,
+            epoch_ival_ms=self.epoch_ival_ms)
+        n_trials = len(epo.X)
         if self.restricted_n_trials is not None:
             if self.restricted_n_trials <= 1:
-                n_clean_trials = int(n_clean_trials * self.restricted_n_trials)
+                n_trials = int(n_trials * self.restricted_n_trials)
             else:
-                n_clean_trials = min(n_clean_trials, self.restricted_n_trials)
+                n_trials = min(n_trials, self.restricted_n_trials)
         rng = RandomState(903372376)
-        folds = get_balanced_batches(n_clean_trials, rng, self.shuffle,
+        folds = get_balanced_batches(n_trials, rng, self.shuffle,
                                      n_batches=self.n_folds)
 
         # remap to original indices in unclean set(!)
         # train is everything except fold
         # test is fold inds
-        self.folds = list(map(lambda fold:
-            {'train': self.clean_trials[
-                      np.setdiff1d(np.arange(n_clean_trials),fold)],
-             'test': self.clean_trials[fold]},
-            folds))
+        self.folds = [{'train': np.setdiff1d(np.arange(n_trials),fold),
+             'test': fold}
+                      for fold in folds]
         if self.only_last_fold:
             self.folds = self.folds[-1:]
 
@@ -268,9 +171,6 @@ class CSPExperiment(object):
         self.binary_csp = BinaryCSP(self.cnt, self.filterbands, 
             self.filt_order, self.folds, self.class_pairs, 
             self.epoch_ival_ms, self.n_top_bottom_csp_filters,
-            standardize_filt_cnt=self.standardize_filt_cnt,
-            standardize_epo=self.standardize_epo,
-            ival_optimizer=self.ival_optimizer,
             marker_def=self.name_to_start_codes)
         self.binary_csp.run()
         log.info("Filterbank...")
@@ -327,12 +227,9 @@ class CSPRetrain():
         log.info("Rerunning multiclass...")
         self.trainer.multi_class.run()
 
-class TwoFileCSPExperiment(CSPExperiment):
-    def __init__(self,train_set_loader, test_set_loader, train_cleaner,
-            test_cleaner, 
-            sensor_names=None,
-            resample_fs=None,
-            standardize_cnt=False,
+
+class TrainTestCSPExperiment(CSPExperiment):
+    def __init__(self,train_cnt, test_cnt,
             min_freq=0,
             max_freq=48,
             last_low_freq=48,
@@ -341,9 +238,7 @@ class TwoFileCSPExperiment(CSPExperiment):
             high_width=4,
             high_overlap=0,
             filt_order=3,
-            standardize_filt_cnt=False,
-            segment_ival=[0,4000], 
-            standardize_epo=True,
+            segment_ival=[0,4000],
             n_folds=5,
             n_top_bottom_csp_filters=None,
             n_selected_filterbands=None,
@@ -353,78 +248,35 @@ class TwoFileCSPExperiment(CSPExperiment):
             stop_when_no_improvement=False,
             only_last_fold=False,
             restricted_n_trials=None,
-            common_average_reference=False,
-            ival_optimizer=None,
             shuffle=False,
-            marker_def=None,
-            set_cz_to_zero=False,
+            epoch_ival_ms=None,
             low_bound=0.2):
-        self.test_set_loader = test_set_loader
-        self.test_cleaner = test_cleaner
-        super(TwoFileCSPExperiment, self).__init__(train_set_loader, 
-            cleaner=train_cleaner,sensor_names=sensor_names,
-            resample_fs=resample_fs, standardize_cnt=standardize_cnt,
-            min_freq=min_freq,max_freq=max_freq,
-            last_low_freq=last_low_freq,low_width=low_width,
-            low_overlap=low_overlap,high_width=high_width,
-            high_overlap=high_overlap,filt_order=filt_order,
-            standardize_filt_cnt=standardize_filt_cnt,
-            segment_ival=segment_ival, standardize_epo=standardize_epo,
-            n_folds=n_folds,n_top_bottom_csp_filters=n_top_bottom_csp_filters,
+        self.test_cnt = test_cnt
+        super(TrainTestCSPExperiment, self).__init__(
+            train_cnt,
+            min_freq=min_freq, max_freq=max_freq,
+            last_low_freq=last_low_freq, low_width=low_width,
+            low_overlap=low_overlap, high_width=high_width,
+            high_overlap=high_overlap, filt_order=filt_order,
+            segment_ival=segment_ival,
+            n_folds=n_folds,
+            n_top_bottom_csp_filters=n_top_bottom_csp_filters,
             n_selected_filterbands=n_selected_filterbands,
             n_selected_features=n_selected_features,
-            forward_steps=forward_steps,backward_steps=backward_steps,
+            forward_steps=forward_steps, backward_steps=backward_steps,
             stop_when_no_improvement=stop_when_no_improvement,
-            only_last_fold=only_last_fold,restricted_n_trials=restricted_n_trials,
-            common_average_reference=common_average_reference,
-            ival_optimizer=ival_optimizer,shuffle=shuffle,
-            marker_def=marker_def,
-            set_cz_to_zero=set_cz_to_zero,
+            only_last_fold=only_last_fold,
+            restricted_n_trials=restricted_n_trials,
+            shuffle=shuffle,
+            epoch_ival_ms=epoch_ival_ms,
             low_bound=low_bound)
 
     def run(self):
-        log.info("Loading train set...")
-        self.load_bbci_set()
-        log.info("Loading test set...")
-        self.load_bbci_test_set()
-        log.info("Cleaning both sets...")
-        self.clean_both_sets()
-        log.info("Preprocessing train set...")
-        self.preprocess_set()
-        log.info("Preprocessing test set...")
-        self.preprocess_test_set()
-        self.remember_sensor_names()
+        # Actually not necessary to overwrite, just to make sure its stays
+        # same for now, in case superclass changes run method
         self.init_training_vars()
         log.info("Running Training...")
         self.run_training()
-
-    def load_bbci_test_set(self):
-        self.test_cnt = self.test_set_loader.load()
-
-    def clean_both_sets(self):
-        # Clean by directy changing the cnt variables...
-        clean_train_cnt, clean_test_cnt = clean_train_test_cnt(
-            self.cnt, self.test_cnt, self.cleaner,
-            self.test_cleaner)
-        self.cnt = clean_train_cnt
-        self.test_cnt = clean_test_cnt
-        self.rejected_chan_names = [] # necessary since will be used
-        # in preprocess set...
-        self.rejected_trials = 'unknown'
-        self.clean_trials = 'unknown'
-
-    def preprocess_test_set(self):
-        if self.sensor_names is not None:
-            self.sensor_names = sort_topologically(self.sensor_names)
-            self.test_cnt = select_channels(self.test_cnt, self.sensor_names)
-        if self.set_cz_to_zero is True:
-            self.test_cnt = set_channel_to_zero(self.test_cnt, 'Cz')
-        if self.resample_fs is not None:
-            self.test_cnt = resample_cnt(self.test_cnt, new_fs=self.resample_fs)
-        if self.common_average_reference is True:
-            self.test_cnt = common_average_reference_cnt(self.test_cnt)
-        if self.standardize_cnt is True:
-            self.test_cnt = exponential_standardize_cnt(self.test_cnt)
 
     def init_training_vars(self):
         assert self.n_folds is None, "Cannot use folds on train test split"
@@ -435,30 +287,34 @@ class TwoFileCSPExperiment(CSPExperiment):
             high_width=self.high_width, high_overlap=self.high_overlap,
             low_bound=self.low_bound)
         assert filterbank_is_stable(self.filterbands, self.filt_order, 
-            self.cnt.attrs['fs']), (
+            self.cnt.info['sfreq']), (
                 "Expect filter bank to be stable given filter order.")
         # check if number of selected features is not too large
 
         if self.n_selected_features is not None:
             n_spatial_filters = self.n_top_bottom_csp_filters
             if n_spatial_filters is None:
-                n_spatial_filters = len(self.sensor_names)
+                n_spatial_filters = len(self.cnt.ch_names)
             n_max_features = len(self.filterbands) * n_spatial_filters
             assert n_max_features >= self.n_selected_features, (
                 "Cannot select more features than will be originally created "
                 "Originally: {:d}, requested: {:d}".format(
                     n_max_features, self.n_selected_features)
             )
-        n_classes = len(self.marker_def)
+        n_classes = len(self.epoch_ival_ms)
         self.class_pairs = list(itertools.combinations(range(n_classes),2))
-        # check that markers are all for trials
-        for mrk_code in np.concatenate((
-            self.cnt.attrs['events'][:,1],
-            self.test_cnt.attrs['events'][:,1])):
-            assert mrk_code in list(itertools.chain(*self.marker_def.values()))
-        train_fold = list(range(len(self.cnt.attrs['events'])))
-        test_fold = np.arange(len(self.test_cnt.attrs['events'])) + (
-            len(train_fold))
+
+        train_epo = create_signal_target_from_raw_mne(
+            self.cnt, name_to_start_codes=self.name_to_start_codes,
+            epoch_ival_ms=self.epoch_ival_ms)
+        n_train_trials = len(train_epo.X)
+        test_epo = create_signal_target_from_raw_mne(
+            self.test_cnt, name_to_start_codes=self.name_to_start_codes,
+            epoch_ival_ms=self.epoch_ival_ms)
+        n_test_trials = len(test_epo.X)
+
+        train_fold = np.arange(n_train_trials)
+        test_fold = np.arange(n_train_trials, n_train_trials+n_test_trials)
         self.folds = [{'train': train_fold, 'test': test_fold}]
         assert np.intersect1d(self.folds[0]['test'], 
             self.folds[0]['train']).size == 0

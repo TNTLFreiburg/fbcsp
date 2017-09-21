@@ -1,11 +1,5 @@
 import logging
-#from braindecode.trial_segment import segment_dat
-#from braindecode.mywyrm.processing import (
-#    lda_apply, select_classes,
-#    lda_train_scaled, apply_csp_var_log, bandpass_cnt,
-#    calculate_csp, exponential_standardize_cnt)
 import numpy as np
-#from braindecode.mywyrm.processing import online_standardize_epo
 from braindecode.datautil.trial_segment import create_signal_target_from_raw_mne
 from fbcsp.lda import lda_train_scaled, lda_apply
 from fbcsp.signalproc import bandpass_mne, select_trials, select_classes, \
@@ -16,9 +10,8 @@ log = logging.getLogger(__name__)
 
 class BinaryCSP(object):
     def __init__(self, cnt, filterbands, filt_order, folds,
-            class_pairs, segment_ival, n_filters,
-            ival_optimizer, standardize_filt_cnt,
-            standardize_epo, marker_def):
+            class_pairs, epoch_ival_ms, n_filters,
+            marker_def):
         self.__dict__.update(locals())
         del self.self
 
@@ -31,12 +24,10 @@ class BinaryCSP(object):
             self.print_filter(bp_nr)
             bandpassed_cnt = bandpass_mne(self.cnt, filt_band[0], filt_band[1],
                 filt_order=self.filt_order)
-            if self.standardize_filt_cnt:
-                bandpassed_cnt = exponential_standardize_cnt(bandpassed_cnt)
             epo = create_signal_target_from_raw_mne(
                 bandpassed_cnt,
                 name_to_start_codes=self.marker_def,
-                epoch_ival_ms=self.segment_ival)
+                epoch_ival_ms=self.epoch_ival_ms, )
 
             for fold_nr in range(len(self.folds)):
                 self.run_fold(epo, bp_nr, fold_nr)
@@ -48,9 +39,6 @@ class BinaryCSP(object):
         test_ind = train_test['test']
         epo_train = select_trials(epo, train_ind)
         epo_test = select_trials(epo, test_ind)
-        if self.standardize_epo:
-            assert False
-            epo_train, epo_test = online_standardize_epo(epo_train, epo_test)
         # TODELAY: also integrate into init and store results
         self.train_labels_full_fold[fold_nr] = epo_train.y
         self.test_labels_full_fold[fold_nr] = epo_test.y
@@ -66,9 +54,7 @@ class BinaryCSP(object):
         epo_train_pair = select_classes(epo_train, class_pair)
         epo_test_pair = select_classes(epo_test, class_pair)
 
-        assert self.ival_optimizer is None
 
-            
         self.train_labels[fold_nr][pair_nr] = epo_train_pair.y
         self.test_labels[fold_nr][pair_nr] = epo_test_pair.y
         
@@ -90,14 +76,10 @@ class BinaryCSP(object):
         assert not np.any(np.isnan(clf[0]))
         assert not np.isnan(clf[1])
         ## Apply LDA to train
-        #from numpy.random import  RandomState
-        #clf = (RandomState(39483498).randn(len(clf[0])), clf[1])
         train_out = lda_apply(train_feature, clf)
         true_0_1_labels_train = train_feature.y == class_pair[1]
 
         predicted_train = train_out >= 0
-        #print("predicted train", predicted_train)
-        #print("true_0_1_labels_train ", true_0_1_labels_train)
         train_accuracy = np.mean(true_0_1_labels_train == predicted_train)
 
         ### Feature Computation and LDA Application for test
@@ -107,11 +89,7 @@ class BinaryCSP(object):
         true_0_1_labels_test= test_feature.y == class_pair[1]
         predicted_test = test_out >= 0
         test_accuracy = np.mean(true_0_1_labels_test == predicted_test)
-        #print("test out", test_out)
-        #print("predicted test", predicted_test)
-        #print("true_0_1_labels_test ", true_0_1_labels_test)
 
-        #print("equal predicted and actual ", true_0_1_labels_test == predicted_test)
         ### Feature Computations for full fold (for later multiclass)
         train_feature_full_fold = apply_csp_var_log(epo_train,
              filters, columns)
@@ -140,8 +118,6 @@ class BinaryCSP(object):
                         'train_feature', 'test_feature',
                         'train_feature_full_fold', 'test_feature_full_fold', 
                         'clf', 'train_accuracy', 'test_accuracy']
-        if self.ival_optimizer is not None:
-            all_varnames.append('best_ival')
         for varname in all_varnames:
             self.__dict__[varname] = np.empty(result_shape, dtype=object)
 

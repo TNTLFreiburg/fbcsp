@@ -2,10 +2,9 @@ from copy import deepcopy
 import logging
 import numpy as np
 import scipy.signal
-from sklearn.cross_validation import KFold
-#from braindecode.csp.feature_selection import select_features
-#from braindecode.util import deepcopy_xarr
-from fbcsp.signalproc import concatenate_channels
+
+from braindecode.datautil.iterators import get_balanced_batches
+from fbcsp.signalproc import concatenate_channels, select_trials
 from fbcsp.lda import lda_train_scaled, lda_apply
 
 
@@ -156,16 +155,16 @@ class FilterbankCSP(object):
         self.selected_filters_per_filterband = np.empty(result_shape, dtype=object)
         for fold_i in range(n_folds):
             for class_pair_i in range(n_class_pairs):
-                bin_csp_train_features = deepcopy_xarr_list(
+                bin_csp_train_features = deepcopy(
                     bincsp.train_feature[
                         self.selected_filter_inds, fold_i, class_pair_i].squeeze())
-                bin_csp_train_features_full_fold = deepcopy_xarr_list(
+                bin_csp_train_features_full_fold = deepcopy(
                     bincsp.train_feature_full_fold[
                         self.selected_filter_inds,
                         fold_i, class_pair_i])
-                bin_csp_test_features = deepcopy_xarr_list(bincsp.test_feature[
+                bin_csp_test_features = deepcopy(bincsp.test_feature[
                     self.selected_filter_inds, fold_i, class_pair_i].squeeze())
-                bin_csp_test_features_full_fold = deepcopy_xarr_list(
+                bin_csp_test_features_full_fold = deepcopy(
                     bincsp.test_feature_full_fold[
                         self.selected_filter_inds, fold_i, class_pair_i].squeeze())
                 selected_filters_per_filt = self.select_best_filters_best_filterbands(
@@ -195,9 +194,9 @@ class FilterbankCSP(object):
                                              forward_steps, backward_steps, stop_when_no_improvement):
         assert max_features is not None, (
             "For now not dealing with the case that max features is unlimited")
-        assert features[0].data.shape[1] % 2 == 0
+        assert features[0].X.shape[1] % 2 == 0
         n_filterbands = len(features)
-        n_filters_per_fb = features[0].data.shape[1] / 2
+        n_filters_per_fb = features[0].X.shape[1] / 2
         selected_filters_per_band = [0] * n_filterbands
         best_selected_filters_per_filterband = None
         last_best_accuracy = -1
@@ -245,45 +244,50 @@ class FilterbankCSP(object):
 
     @staticmethod
     def collect_features_for_filter_selection(features, filters_for_filterband):
-        n_filters_per_fb = features[0].data.shape[1] // 2
+        n_filters_per_fb = features[0].X.shape[1] // 2
         n_filterbands = len(features)
         # start with filters of first filterband...
         # then add others all together
-        first_features = deepcopy_xarr(features[0])
+        first_features = deepcopy(features[0])
         first_n_filters = filters_for_filterband[0]
         if first_n_filters == 0:
-            first_features = first_features[:,0:0]
+            first_features.X = first_features.X[:,0:0]
         else:
-            first_features = first_features[:, list(range(first_n_filters)) +
+            first_features.X = first_features.X[:, list(range(first_n_filters)) +
                list(range(-first_n_filters, 0))]
 
         all_features = first_features
         for i in range(1, n_filterbands):
             this_n_filters = min(n_filters_per_fb, filters_for_filterband[i])
             if this_n_filters > 0:
-                next_features = deepcopy_xarr(features[i])
+                next_features = deepcopy(features[i])
                 if this_n_filters == 0:
-                    next_features = next_features[0:0]
+                    next_features.X = next_features.X[0:0]
                 else:
-                    next_features = next_features[
+                    next_features.X = next_features.X[
                      :, list(range(this_n_filters)) +
                         list(range(-this_n_filters, 0))]
-                all_features = xr.concat((all_features, next_features),
-                                         dim='CSP filter')
+                all_features = concatenate_channels(
+                    (all_features, next_features))
         return all_features
 
     @staticmethod
     def cross_validate_lda(features):
-        folds = KFold(features.data.shape[0], n_folds=5, shuffle=False)
+        n_trials = features.X.shape[0]
+        folds = get_balanced_batches(n_trials, rng=None, shuffle=False,
+                                     n_batches=5)
+        # make to train-test splits, fold is test part..
+        folds = [(np.setdiff1d(np.arange(n_trials), fold),
+                  fold) for fold in folds]
         test_accuracies = []
         for train_inds, test_inds in folds:
-            train_features = features[train_inds]
-            test_features = features[test_inds]
+            train_features = select_trials(features, train_inds)
+            test_features = select_trials(features, test_inds)
             clf = lda_train_scaled(train_features, shrink=True)
             test_out = lda_apply(test_features, clf)
 
-            higher_class = np.max(test_features.trials.data)
-            true_0_1_labels_test = test_features.trials.data == higher_class
+            higher_class = np.max(test_features.y)
+            true_0_1_labels_test = test_features.y == higher_class
 
             predicted_test = test_out >= 0
             test_accuracy = np.mean(true_0_1_labels_test == predicted_test)
