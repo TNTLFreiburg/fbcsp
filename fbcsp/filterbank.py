@@ -123,8 +123,6 @@ class FilterbankCSP(object):
 
         bcsp = self.binary_csp  # just to make code shorter
         filter_inds = self.selected_filter_inds
-        # merge along featureaxis: axis 1
-        #merge_features = lambda fv1, fv2: append_epo(fv1, fv2, classaxis=1)
         for fold_i in range(n_folds):
             for class_i in range(n_class_pairs):
                 self.train_feature[fold_i, class_i] = concatenate_channels(

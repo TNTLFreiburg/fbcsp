@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import numpy as np
 import scipy as sp
 
@@ -19,11 +21,27 @@ def select_trials(dataset, inds):
     return SignalAndTarget(new_X, new_y)
 
 
+def select_classes_cnt(cnt, class_numbers):
+    cnt = deepcopy(cnt)
+    events = cnt.info['events']
+    new_events = [ev for ev in events if (ev[2] - ev[1]) in class_numbers]
+    cnt.info['events'] = np.array(new_events)
+    return cnt
+
+
 def select_classes(dataset, class_numbers):
     wanted_inds = [i_trial for i_trial, y in enumerate(dataset.y)
                    if y in class_numbers]
     return select_trials(dataset, wanted_inds)
 
+
+def select_trials_cnt(cnt, inds):
+    cnt = deepcopy(cnt)
+    assert np.all([i in np.arange(len(cnt.info['events'])) for i in inds])
+    events = cnt.info['events']
+    new_events = [ev for i_trial, ev in enumerate(events) if i_trial in inds]
+    cnt.info['events'] = np.array(new_events)
+    return cnt
 
 def concatenate_channels(datasets):
     all_X = [dataset.X for dataset in datasets]
@@ -32,6 +50,16 @@ def concatenate_channels(datasets):
     for dataset in datasets:
         assert np.array_equal(dataset.y, new_y)
     return SignalAndTarget(new_X, new_y)
+
+
+def extract_all_start_codes(name_to_start_codes):
+    all_start_codes = []
+    for val in name_to_start_codes.values():
+        if hasattr(val, '__len__'):
+            all_start_codes.extend(val)
+        else:
+            all_start_codes.append(val)
+    return all_start_codes
 
 
 def calculate_csp(epo, classes=None):
