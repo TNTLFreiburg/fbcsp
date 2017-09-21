@@ -25,6 +25,15 @@ def select_classes(dataset, class_numbers):
     return select_trials(dataset, wanted_inds)
 
 
+def concatenate_channels(datasets):
+    all_X = [dataset.X for dataset in datasets]
+    new_X = np.concatenate(all_X, axis=1)
+    new_y = datasets[0].y
+    for dataset in datasets:
+        assert np.array_equal(dataset.y, new_y)
+    return SignalAndTarget(new_X, new_y)
+
+
 def calculate_csp(epo, classes=None):
     """Calculate the Common Spatial Pattern (CSP) for two classes.
     Now with pattern computation as in matlab bbci toolbox

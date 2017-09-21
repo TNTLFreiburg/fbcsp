@@ -4,8 +4,9 @@
 #from braindecode.mywyrm.clean import (NoCleaner, clean_train_test_cnt)
 import itertools
 from braindecode.datautil.iterators import get_balanced_batches
+from braindecode.mne_ext.signalproc import concatenate_raws_with_events
 from fbcsp.binary import BinaryCSP
-#from braindecode.csp.filterbank import FilterbankCSP
+from fbcsp.filterbank import FilterbankCSP
 #from braindecode.csp.multiclass import    MultiClassWeightedVoting
 import numpy as np
 #from copy import deepcopy
@@ -15,6 +16,7 @@ from fbcsp.filterbank import generate_filterbank, filterbank_is_stable
 from fbcsp.clean import NoCleaner
 import logging
 
+from fbcsp.multiclass import MultiClassWeightedVoting
 
 log = logging.getLogger(__name__)
 
@@ -271,7 +273,7 @@ class CSPExperiment(object):
             ival_optimizer=self.ival_optimizer,
             marker_def=self.name_to_start_codes)
         self.binary_csp.run()
-        
+        log.info("Filterbank...")
         self.filterbank_csp = FilterbankCSP(self.binary_csp, 
             n_features=self.n_selected_features,
             n_filterbands=self.n_selected_filterbands,
@@ -279,7 +281,8 @@ class CSPExperiment(object):
             backward_steps=self.backward_steps,
             stop_when_no_improvement=self.stop_when_no_improvement)
         self.filterbank_csp.run()
-        
+
+        log.info("Multiclass...")
         self.multi_class = MultiClassWeightedVoting(
                                     self.binary_csp.train_labels_full_fold, 
                                     self.binary_csp.test_labels_full_fold,
@@ -460,7 +463,7 @@ class TwoFileCSPExperiment(CSPExperiment):
         assert np.intersect1d(self.folds[0]['test'], 
             self.folds[0]['train']).size == 0
         # merge cnts!!
-        self.cnt = concatenate_cnt(self.cnt, self.test_cnt)
+        self.cnt = concatenate_raws_with_events(self.cnt, self.test_cnt)
 
 
 def recreate_filterbank(train_csp_obj, n_features, n_filterbands,

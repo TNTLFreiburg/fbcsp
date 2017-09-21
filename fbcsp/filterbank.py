@@ -3,10 +3,10 @@ import logging
 import numpy as np
 import scipy.signal
 from sklearn.cross_validation import KFold
-#from braindecode.mywyrm.processing import (
-#    lda_train_scaled, lda_apply)
 #from braindecode.csp.feature_selection import select_features
 #from braindecode.util import deepcopy_xarr
+from fbcsp.signalproc import concatenate_channels
+from fbcsp.lda import lda_train_scaled, lda_apply
 
 
 log = logging.getLogger(__name__)
@@ -128,32 +128,18 @@ class FilterbankCSP(object):
         #merge_features = lambda fv1, fv2: append_epo(fv1, fv2, classaxis=1)
         for fold_i in range(n_folds):
             for class_i in range(n_class_pairs):
-
-                self.train_feature[fold_i, class_i] = xr.concat(
-                    bcsp.train_feature[filter_inds, fold_i, class_i],
-                    dim='CSP filter'
-                )#\
-                    #reduce(
-                    #merge_features,
-                    #bincsp.train_feature[filter_inds, fold_i, class_i])
-                self.train_feature_full_fold[fold_i, class_i] = xr.concat(
-                    bcsp.train_feature_full_fold[filter_inds, fold_i, class_i],
-                    dim='CSP filter'
-                )#reduce(
-                  #  merge_features,
-                   # bincsp.train_feature_full_fold[filter_inds, fold_i, class_i])
-                self.test_feature[fold_i, class_i] = xr.concat(
-                    bcsp.test_feature[filter_inds, fold_i, class_i],
-                    dim='CSP filter'
-                )#reduce(
-                 #   merge_features,
-                 #   bincsp.test_feature[filter_inds, fold_i, class_i])
-                self.test_feature_full_fold[fold_i, class_i] = xr.concat(
-                    bcsp.test_feature_full_fold[filter_inds, fold_i, class_i],
-                    dim='CSP filter'
-                )#reduce(
-                 #   merge_features,
-                  #  bincsp.test_feature_full_fold[filter_inds, fold_i, class_i])
+                self.train_feature[fold_i, class_i] = concatenate_channels(
+                    bcsp.train_feature[filter_inds, fold_i, class_i])
+                self.train_feature_full_fold[fold_i, class_i] = (
+                    concatenate_channels(
+                    bcsp.train_feature_full_fold[filter_inds, fold_i, class_i]))
+                self.test_feature[fold_i, class_i] = concatenate_channels(
+                    bcsp.test_feature[filter_inds, fold_i, class_i]
+                )
+                self.test_feature_full_fold[fold_i, class_i] = (
+                    concatenate_channels(
+                    bcsp.test_feature_full_fold[filter_inds, fold_i, class_i]
+                ))
 
     def collect_best_features(self):
         """ Selects features filterwise per filterband, starting with no features,
@@ -356,7 +342,7 @@ class FilterbankCSP(object):
                 log.info("Class {:d} vs {:d}".format(*class_pair_plus_one))
                 train_feature = self.train_feature[fold_i, class_i]
                 train_out = lda_apply(train_feature, clf)
-                true_0_1_labels_train = train_feature.trials == class_pair[1]
+                true_0_1_labels_train = train_feature.y == class_pair[1]
                 predicted_train = train_out >= 0
                 # remove xarray wrapper with float( ...
                 train_accuracy = float(np.mean(true_0_1_labels_train ==
@@ -365,7 +351,7 @@ class FilterbankCSP(object):
 
                 test_feature = self.test_feature[fold_i, class_i]
                 test_out = lda_apply(test_feature, clf)
-                true_0_1_labels_test = test_feature.trials == class_pair[1]
+                true_0_1_labels_test = test_feature.y == class_pair[1]
                 predicted_test = test_out >= 0
                 test_accuracy = float(np.mean(true_0_1_labels_test ==
                                               predicted_test))
