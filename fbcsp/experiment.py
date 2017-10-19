@@ -229,7 +229,10 @@ class CSPRetrain():
 
 
 class TrainTestCSPExperiment(CSPExperiment):
-    def __init__(self,train_cnt, test_cnt,
+    def __init__(
+            self,train_cnt, test_cnt,
+            name_to_start_codes,
+            epoch_ival_ms,
             min_freq=0,
             max_freq=48,
             last_low_freq=48,
@@ -238,38 +241,43 @@ class TrainTestCSPExperiment(CSPExperiment):
             high_width=4,
             high_overlap=0,
             filt_order=3,
-            segment_ival=[0,4000],
-            n_folds=5,
+            n_folds=None,
             n_top_bottom_csp_filters=None,
             n_selected_filterbands=None,
             n_selected_features=None,
-            forward_steps=4,
-            backward_steps=2,
+            forward_steps=2,
+            backward_steps=1,
             stop_when_no_improvement=False,
             only_last_fold=False,
             restricted_n_trials=None,
             shuffle=False,
-            epoch_ival_ms=None,
             low_bound=0.2):
         self.test_cnt = test_cnt
         super(TrainTestCSPExperiment, self).__init__(
             train_cnt,
-            min_freq=min_freq, max_freq=max_freq,
-            last_low_freq=last_low_freq, low_width=low_width,
-            low_overlap=low_overlap, high_width=high_width,
-            high_overlap=high_overlap, filt_order=filt_order,
-            segment_ival=segment_ival,
+            name_to_start_codes=name_to_start_codes,
+            epoch_ival_ms=epoch_ival_ms,
+            min_freq=min_freq,
+            max_freq=max_freq,
+            last_low_freq=last_low_freq,
+            low_width=low_width,
+            low_overlap=low_overlap,
+            high_width=high_width,
+            high_overlap=high_overlap,
+            filt_order=filt_order,
             n_folds=n_folds,
             n_top_bottom_csp_filters=n_top_bottom_csp_filters,
             n_selected_filterbands=n_selected_filterbands,
             n_selected_features=n_selected_features,
-            forward_steps=forward_steps, backward_steps=backward_steps,
+            forward_steps=forward_steps,
+            backward_steps=backward_steps,
             stop_when_no_improvement=stop_when_no_improvement,
             only_last_fold=only_last_fold,
             restricted_n_trials=restricted_n_trials,
             shuffle=shuffle,
-            epoch_ival_ms=epoch_ival_ms,
             low_bound=low_bound)
+
+
 
     def run(self):
         # Actually not necessary to overwrite, just to make sure its stays
@@ -301,7 +309,7 @@ class TrainTestCSPExperiment(CSPExperiment):
                 "Originally: {:d}, requested: {:d}".format(
                     n_max_features, self.n_selected_features)
             )
-        n_classes = len(self.epoch_ival_ms)
+        n_classes = len(self.name_to_start_codes)
         self.class_pairs = list(itertools.combinations(range(n_classes),2))
 
         train_epo = create_signal_target_from_raw_mne(
@@ -319,7 +327,7 @@ class TrainTestCSPExperiment(CSPExperiment):
         assert np.intersect1d(self.folds[0]['test'], 
             self.folds[0]['train']).size == 0
         # merge cnts!!
-        self.cnt = concatenate_raws_with_events(self.cnt, self.test_cnt)
+        self.cnt = concatenate_raws_with_events([self.cnt, self.test_cnt])
 
 
 def recreate_filterbank(train_csp_obj, n_features, n_filterbands,

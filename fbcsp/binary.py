@@ -146,6 +146,8 @@ class BinaryCSP(object):
             self.__dict__[var][bp_nr, fold_nr, pair_nr] = local_vars[var]
 
     def print_filter(self, bp_nr):
+        # distinguish filter blocks by empty line
+        log.info("\n")
         log.info("Filter {:d}/{:d}, {:4.2f} to {:4.2f} Hz".format(bp_nr + 1, 
                 len(self.filterbands), *self.filterbands[bp_nr]))
 
