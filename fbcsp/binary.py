@@ -11,7 +11,7 @@ log = logging.getLogger(__name__)
 class BinaryCSP(object):
     def __init__(self, cnt, filterbands, filt_order, folds,
             class_pairs, epoch_ival_ms, n_filters,
-            marker_def):
+            marker_def, name_to_stop_codes=None):
         self.__dict__.update(locals())
         del self.self
 
@@ -27,7 +27,8 @@ class BinaryCSP(object):
             epo = create_signal_target_from_raw_mne(
                 bandpassed_cnt,
                 name_to_start_codes=self.marker_def,
-                epoch_ival_ms=self.epoch_ival_ms, )
+                epoch_ival_ms=self.epoch_ival_ms,
+                name_to_stop_codes=self.name_to_stop_codes)
 
             for fold_nr in range(len(self.folds)):
                 self.run_fold(epo, bp_nr, fold_nr)
@@ -39,6 +40,8 @@ class BinaryCSP(object):
         test_ind = train_test['test']
         epo_train = select_trials(epo, train_ind)
         epo_test = select_trials(epo, test_ind)
+        log.info("#Train trials: {:4d}".format(len(epo_train.X)))
+        log.info("#Test trials : {:4d}".format(len(epo_test.X)))
         # TODELAY: also integrate into init and store results
         self.train_labels_full_fold[fold_nr] = epo_train.y
         self.test_labels_full_fold[fold_nr] = epo_test.y

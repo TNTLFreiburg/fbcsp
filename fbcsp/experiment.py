@@ -1,6 +1,7 @@
 import itertools
 from braindecode.datautil.iterators import get_balanced_batches
-from braindecode.datautil.trial_segment import create_signal_target_from_raw_mne
+from braindecode.datautil.trial_segment import (
+    create_signal_target_from_raw_mne)
 from braindecode.mne_ext.signalproc import concatenate_raws_with_events
 from fbcsp.binary import BinaryCSP
 from fbcsp.filterbank import FilterbankCSP
@@ -88,6 +89,7 @@ class CSPExperiment(object):
             cnt,
             name_to_start_codes,
             epoch_ival_ms,
+            name_to_stop_codes=None,
             min_freq=0,
             max_freq=48,
             last_low_freq=48,
@@ -147,7 +149,8 @@ class CSPExperiment(object):
         # use only number of clean trials to split folds
         epo = create_signal_target_from_raw_mne(
             self.cnt, name_to_start_codes=self.name_to_start_codes,
-            epoch_ival_ms=self.epoch_ival_ms)
+            epoch_ival_ms=self.epoch_ival_ms,
+            name_to_stop_codes=self.name_to_stop_codes)
         n_trials = len(epo.X)
         if self.restricted_n_trials is not None:
             if self.restricted_n_trials <= 1:
@@ -168,10 +171,12 @@ class CSPExperiment(object):
             self.folds = self.folds[-1:]
 
     def run_training(self):
-        self.binary_csp = BinaryCSP(self.cnt, self.filterbands, 
+        self.binary_csp = BinaryCSP(
+            self.cnt, self.filterbands,
             self.filt_order, self.folds, self.class_pairs, 
             self.epoch_ival_ms, self.n_top_bottom_csp_filters,
-            marker_def=self.name_to_start_codes)
+            marker_def=self.name_to_start_codes,
+            name_to_stop_codes=self.name_to_stop_codes)
         self.binary_csp.run()
         log.info("Filterbank...")
         self.filterbank_csp = FilterbankCSP(self.binary_csp, 
@@ -233,6 +238,7 @@ class TrainTestCSPExperiment(CSPExperiment):
             self,train_cnt, test_cnt,
             name_to_start_codes,
             epoch_ival_ms,
+            name_to_stop_codes=None,
             min_freq=0,
             max_freq=48,
             last_low_freq=48,
@@ -257,6 +263,7 @@ class TrainTestCSPExperiment(CSPExperiment):
             train_cnt,
             name_to_start_codes=name_to_start_codes,
             epoch_ival_ms=epoch_ival_ms,
+            name_to_stop_codes=name_to_stop_codes,
             min_freq=min_freq,
             max_freq=max_freq,
             last_low_freq=last_low_freq,
@@ -314,11 +321,13 @@ class TrainTestCSPExperiment(CSPExperiment):
 
         train_epo = create_signal_target_from_raw_mne(
             self.cnt, name_to_start_codes=self.name_to_start_codes,
-            epoch_ival_ms=self.epoch_ival_ms)
+            epoch_ival_ms=self.epoch_ival_ms,
+            name_to_stop_codes=self.name_to_stop_codes)
         n_train_trials = len(train_epo.X)
         test_epo = create_signal_target_from_raw_mne(
             self.test_cnt, name_to_start_codes=self.name_to_start_codes,
-            epoch_ival_ms=self.epoch_ival_ms)
+            epoch_ival_ms=self.epoch_ival_ms,
+            name_to_stop_codes=self.name_to_stop_codes)
         n_test_trials = len(test_epo.X)
 
         train_fold = np.arange(n_train_trials)

@@ -16,7 +16,12 @@ def bandpass_mne(cnt, low_cut_hz, high_cut_hz, filt_order=3, axis=0):
 
 
 def select_trials(dataset, inds):
-    new_X = np.asarray(dataset.X)[inds]
+    if hasattr(dataset.X, 'ndim'):
+        # numpy array
+        new_X = np.array(dataset.X)[inds]
+    else:
+        # list
+        new_X = [dataset.X[i] for i in inds]
     new_y = np.asarray(dataset.y)[inds]
     return SignalAndTarget(new_X, new_y)
 
@@ -116,7 +121,7 @@ def calculate_csp(epo, classes=None):
     ----------
     http://en.wikipedia.org/wiki/Common_spatial_pattern
     """
-    n_channels = epo.X.shape[1]
+    n_channels = epo.X[0].shape[0]
     if classes is None:
         # automagically find the first two different classidx
         # we don't use uniq, since it sorts the classidx first
@@ -135,9 +140,9 @@ def calculate_csp(epo, classes=None):
     epo2 = select_classes(epo, [cidx2])
     # we need a matrix of the form (observations, channels) so we stack trials
     # and time per channel together
+    x1 = np.concatenate(epo1.X, axis=1).T
+    x2 = np.concatenate(epo2.X, axis=1).T
 
-    x1 = epo1.X.transpose(0,2,1).reshape(-1,n_channels)
-    x2 = epo2.X.transpose(0,2,1).reshape(-1,n_channels)
     # compute covariance matrices of the two classes
     c1 = np.cov(x1.transpose())
     c2 = np.cov(x2.transpose())
@@ -223,17 +228,18 @@ def apply_csp_fast(epo, filt, columns=[0, -1]):
 
     """
     f = filt[:, columns]
-    # trials x time x filters
-    filtered = np.empty((epo.X.shape[0], epo.X.shape[2],f.shape[1], ))
-    for trial_i in range(epo.X.shape[0]):
-        filtered[trial_i] = np.dot(epo.X[trial_i].T, f)
-    # to trials x filters x time
-    filtered = filtered.transpose(0,2,1)
+    filtered = []
+    for trial_i in range(len(epo.X)):
+        # time x filters
+        this_filtered = np.dot(epo.X[trial_i].T, f)
+        # to filters x time
+        filtered.append(this_filtered.T)
     return SignalAndTarget(filtered, epo.y)
 
 
 def apply_csp_var_log(epo, filters, columns):
     csp_filtered = apply_csp_fast(epo, filters, columns)
     # 1 is t
-    csp_filtered.X = np.log(np.var(csp_filtered.X, axis=2))
+    csp_filtered.X = np.array([np.log(np.var(trial, axis=1))
+                              for trial in csp_filtered.X])
     return csp_filtered

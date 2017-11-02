@@ -155,16 +155,16 @@ class FilterbankCSP(object):
             for class_pair_i in range(n_class_pairs):
                 bin_csp_train_features = deepcopy(
                     bincsp.train_feature[
-                        self.selected_filter_inds, fold_i, class_pair_i].squeeze())
+                        self.selected_filter_inds, fold_i, class_pair_i])
                 bin_csp_train_features_full_fold = deepcopy(
                     bincsp.train_feature_full_fold[
                         self.selected_filter_inds,
                         fold_i, class_pair_i])
                 bin_csp_test_features = deepcopy(bincsp.test_feature[
-                    self.selected_filter_inds, fold_i, class_pair_i].squeeze())
+                    self.selected_filter_inds, fold_i, class_pair_i])
                 bin_csp_test_features_full_fold = deepcopy(
                     bincsp.test_feature_full_fold[
-                        self.selected_filter_inds, fold_i, class_pair_i].squeeze())
+                        self.selected_filter_inds, fold_i, class_pair_i])
                 selected_filters_per_filt = self.select_best_filters_best_filterbands(
                     bin_csp_train_features, max_features=self.n_features,
                     forward_steps=self.forward_steps,
