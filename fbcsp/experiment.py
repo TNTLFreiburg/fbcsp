@@ -108,7 +108,8 @@ class CSPExperiment(object):
             only_last_fold=False,
             restricted_n_trials=None,
             shuffle=False,
-            low_bound=0.2):
+            low_bound=0.2,
+            average_trial_covariance=False):
         local_vars = locals()
         del local_vars['self']
         self.__dict__.update(local_vars)
@@ -176,7 +177,8 @@ class CSPExperiment(object):
             self.filt_order, self.folds, self.class_pairs, 
             self.epoch_ival_ms, self.n_top_bottom_csp_filters,
             marker_def=self.name_to_start_codes,
-            name_to_stop_codes=self.name_to_stop_codes)
+            name_to_stop_codes=self.name_to_stop_codes,
+            average_trial_covariance=self.average_trial_covariance)
         self.binary_csp.run()
         log.info("Filterbank...")
         self.filterbank_csp = FilterbankCSP(self.binary_csp, 
@@ -257,7 +259,8 @@ class TrainTestCSPExperiment(CSPExperiment):
             only_last_fold=False,
             restricted_n_trials=None,
             shuffle=False,
-            low_bound=0.2):
+            low_bound=0.2,
+            average_trial_covariance=False):
         self.test_cnt = test_cnt
         super(TrainTestCSPExperiment, self).__init__(
             train_cnt,
@@ -282,7 +285,8 @@ class TrainTestCSPExperiment(CSPExperiment):
             only_last_fold=only_last_fold,
             restricted_n_trials=restricted_n_trials,
             shuffle=shuffle,
-            low_bound=low_bound)
+            low_bound=low_bound,
+            average_trial_covariance=average_trial_covariance)
 
 
 

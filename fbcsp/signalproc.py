@@ -67,7 +67,7 @@ def extract_all_start_codes(name_to_start_codes):
     return all_start_codes
 
 
-def calculate_csp(epo, classes=None):
+def calculate_csp(epo, classes=None, average_trial_covariance=False):
     """Calculate the Common Spatial Pattern (CSP) for two classes.
     Now with pattern computation as in matlab bbci toolbox
     https://github.com/bbci/bbci_public/blob/c7201e4e42f873cced2e068c6cbb3780a8f8e9ec/processing/proc_csp.m#L112
@@ -121,7 +121,6 @@ def calculate_csp(epo, classes=None):
     ----------
     http://en.wikipedia.org/wiki/Common_spatial_pattern
     """
-    n_channels = epo.X[0].shape[0]
     if classes is None:
         # automagically find the first two different classidx
         # we don't use uniq, since it sorts the classidx first
@@ -138,14 +137,18 @@ def calculate_csp(epo, classes=None):
         cidx2 = classes[1]
     epo1 = select_classes(epo, [cidx1])
     epo2 = select_classes(epo, [cidx2])
-    # we need a matrix of the form (observations, channels) so we stack trials
-    # and time per channel together
-    x1 = np.concatenate(epo1.X, axis=1).T
-    x2 = np.concatenate(epo2.X, axis=1).T
-
-    # compute covariance matrices of the two classes
-    c1 = np.cov(x1.transpose())
-    c2 = np.cov(x2.transpose())
+    if average_trial_covariance:
+        # computing c1 as mean covariance  of trial covariances:
+        c1 = np.mean([np.cov(x) for x in epo1.X], axis=0)
+        c2 = np.mean([np.cov(x) for x in epo2.X], axis=0)
+    else:
+        # we need a matrix of the form (channels, observations) so we stack trials
+        # and time per channel together
+        x1 = np.concatenate(epo1.X, axis=1)
+        x2 = np.concatenate(epo2.X, axis=1)
+        # compute covariance matrices of the two classes
+        c1 = np.cov(x1)
+        c2 = np.cov(x2)
     # solution of csp objective via generalized eigenvalue problem
     # in matlab the signature is v, d = eig(a, b)
     d, v = sp.linalg.eig(c1 - c2, c1 + c2)

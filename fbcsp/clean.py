@@ -61,16 +61,32 @@ def apply_multiple_cleaners(cnt, epoch_ival_ms, name_to_start_codes, cleaners):
     return cleaned_cnt
 
 
-class MaxAbsCleaner(object):
+class MaxAbsTrialCleaner(object):
     def __init__(self, threshold):
         self.threshold = threshold
 
     def clean(self, X, ignore_chans=False):
         # max abs over samples and channels
-        trial_max = np.max(np.abs(X), axis=(1, 2))
+        trial_max = np.array([np.max(np.abs(x)) for x in X])
         rejected_trials = np.flatnonzero(trial_max > self.threshold)
         clean_result = CleanResult(rejected_i_chans=[],
                                    rejected_i_trials=rejected_trials,)
+        return clean_result
+
+
+class MaxAbsChannelCleaner(object):
+    def __init__(self, threshold, fraction):
+        self.threshold = threshold
+        self.fraction = fraction
+
+    def clean(self, X, ignore_chans=False):
+        # max abs over samples and channels
+        trial_max_per_chan = np.array([np.max(np.abs(x), axis=1) for x in X])
+        above_threshold = trial_max_per_chan > self.threshold
+        fraction_per_chan = np.mean(above_threshold, axis=0)
+        rejected_i_chans = np.flatnonzero(fraction_per_chan > self.fraction)
+        clean_result = CleanResult(rejected_i_chans=rejected_i_chans,
+                                   rejected_i_trials=[],)
         return clean_result
 
 

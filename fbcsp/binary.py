@@ -11,7 +11,7 @@ log = logging.getLogger(__name__)
 class BinaryCSP(object):
     def __init__(self, cnt, filterbands, filt_order, folds,
             class_pairs, epoch_ival_ms, n_filters,
-            marker_def, name_to_stop_codes=None):
+            marker_def, name_to_stop_codes=None, average_trial_covariance=False):
         self.__dict__.update(locals())
         del self.self
 
@@ -62,7 +62,9 @@ class BinaryCSP(object):
         self.test_labels[fold_nr][pair_nr] = epo_test_pair.y
         
         ## Calculate CSP
-        filters, patterns, variances = calculate_csp(epo_train_pair)
+        filters, patterns, variances = calculate_csp(
+            epo_train_pair,
+            average_trial_covariance=self.average_trial_covariance)
         ## Apply csp, calculate features
         if self.n_filters is not None:
             # take topmost and bottommost filters, e.g.

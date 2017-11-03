@@ -28,7 +28,7 @@ def get_templates():
 def get_grid_param_list():
     dictlistprod = cartesian_dict_of_lists_product
     default_params = [{
-        'save_folder': './data/models/fbcsp/6-class/',
+        'save_folder': './data/models/fbcsp/6-class/avg-cov/',
     }]
     filename_params = [
         {
@@ -62,9 +62,9 @@ def get_grid_param_list():
         },
     ]
     sensor_params = [
-        # {
-        #     'sensors': 'all',
-        # },
+        {
+            'sensors': 'all',
+        },
         {
             'sensors': 'C_sensors'
         }]
@@ -116,7 +116,7 @@ def run_exp(
                                        ('Mental Rotation', 5),
                                        ('Rest', 6)])
     name_to_stop_codes = OrderedDict([('Left Hand', [10]), ('Foot', [20],),
-                                      ('Right Han', [30]), ('Word', [40]),
+                                      ('Right Hand', [30]), ('Word', [40]),
                                       ('Mental Rotation', 50),
                                       ('Rest', 60)])
     csp_experiment = CSPExperiment(
