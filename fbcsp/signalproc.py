@@ -151,7 +151,8 @@ def calculate_csp(epo, classes=None, average_trial_covariance=False):
         c2 = np.cov(x2)
     # solution of csp objective via generalized eigenvalue problem
     # in matlab the signature is v, d = eig(a, b)
-    d, v = sp.linalg.eig(c1 - c2, c1 + c2)
+
+    d, v = sp.linalg.eigh(c2, c1 + c2)
     d = d.real
     # make sure the eigenvalues and -vectors are correctly sorted
     indx = np.argsort(d)
