@@ -1,8 +1,8 @@
 import logging
 import numpy as np
 from braindecode.datautil.trial_segment import create_signal_target_from_raw_mne
-from fbcsp.lda import lda_train_scaled, lda_apply
-from fbcsp.signalproc import bandpass_mne, select_trials, select_classes, \
+from .lda import lda_train_scaled, lda_apply
+from .signalproc import bandpass_mne, select_trials, select_classes, \
     calculate_csp, apply_csp_var_log
 
 log = logging.getLogger(__name__)
