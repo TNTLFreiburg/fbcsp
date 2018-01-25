@@ -4,8 +4,8 @@ import numpy as np
 import scipy.signal
 
 from braindecode.datautil.iterators import get_balanced_batches
-from fbcsp.signalproc import concatenate_channels, select_trials
-from fbcsp.lda import lda_train_scaled, lda_apply
+from .signalproc import concatenate_channels, select_trials
+from .lda import lda_train_scaled, lda_apply
 
 
 log = logging.getLogger(__name__)

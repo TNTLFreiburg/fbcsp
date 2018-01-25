@@ -5,7 +5,7 @@ import itertools
 import numpy as np
 
 from braindecode.datautil.trial_segment import create_signal_target_from_raw_mne
-from fbcsp.signalproc import select_classes_cnt, select_trials_cnt, \
+from .signalproc import select_classes_cnt, select_trials_cnt, \
     extract_all_start_codes
 
 log = logging.getLogger(__name__)

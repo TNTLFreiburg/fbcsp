@@ -3,14 +3,14 @@ from braindecode.datautil.iterators import get_balanced_batches
 from braindecode.datautil.trial_segment import (
     create_signal_target_from_raw_mne)
 from braindecode.mne_ext.signalproc import concatenate_raws_with_events
-from fbcsp.binary import BinaryCSP
-from fbcsp.filterbank import FilterbankCSP
+from .binary import BinaryCSP
+from .filterbank import FilterbankCSP
 import numpy as np
 from numpy.random import RandomState
-from fbcsp.filterbank import generate_filterbank, filterbank_is_stable
+from .filterbank import generate_filterbank, filterbank_is_stable
 import logging
 
-from fbcsp.multiclass import MultiClassWeightedVoting
+from .multiclass import MultiClassWeightedVoting
 
 log = logging.getLogger(__name__)
 
